@@ -370,6 +370,7 @@ class DenseSpatialCL(nn.Module):
                 cluster_labels = km.compute_clusters()
                 self._cluster_update(cluster_labels)
         return losses
+        #test
 
     def forward_test(self, img, **kwargs):
         im_q = img.contiguous()
