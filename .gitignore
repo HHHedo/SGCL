@@ -127,3 +127,5 @@ replace.sh
 benchmarks/detection/datasets
 benchmarks/detection/output
 demo/*.jpg
+
+*.png
