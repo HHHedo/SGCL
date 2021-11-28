@@ -213,6 +213,7 @@ class DenseSpatialCL(nn.Module):
                 else:
                     all_close_nei_in_back = all_close_nei_in_back & curr_close_nei
         # concatenate anchor and auxiliary anchor
+        #scatter, dim=1, put src (all_close_nei_in_back(0,1)) by row with the idx (back_nei_idxs)
         pos_idx_scatter = torch.zeros(all_q.shape[0],neighbour_idx.shape[1]).cuda().scatter(1, back_nei_idxs, all_close_nei_in_back.float()) #(bs, ndata)
         if self.aux_num == 1:
             batch_idx_sca, q_idx_sca = torch.split(pos_idx_scatter, q.shape[0], dim=0) # 2*(batch_size, ndata)
@@ -333,17 +334,18 @@ class DenseSpatialCL(nn.Module):
         
         # + spatial 
         s_pos_spatial, spatial_pos_idx = self._spatial_ir(s_all, bag_idx, x_coord, y_coord)
-        # + semantric
+        # + semantic
         s_pos_semantic, semantric_pos_idx = self._simi_ir(s_all, q, idx, spatial_pos_idx) # (batch_size, ndata), similarity
         # - hard mining
         s_mining_negs = self._hard_mining(s_all, q, idx, spatial_pos_idx, semantric_pos_idx) #(bs , k=4096), similarity
-        
+        # spatial loss
         loss_spatial = -torch.mean(torch.log(s_pos_spatial/(s_pos_spatial + s_mining_negs) + 1e-7)) # (batch_size， 1)
+        # semantic loss
         similar_fraction = s_pos_semantic/(s_pos_semantic + s_mining_negs.unsqueeze(-1))  # (batch_size, ndata)
         loss_semantic = -torch.mean(torch.log(torch.sum(nn.functional.normalize(similar_fraction, p=0), dim=1) + 1e-7))
-
+        # InfoNCE
         loss_single = self.head(l_pos, l_neg)['loss_contra']
-
+        # Dense Loss
         loss_dense = self.head(l_pos_dense, l_neg_dense)['loss_contra']
 
         # sementic_weight 
@@ -351,6 +353,7 @@ class DenseSpatialCL(nn.Module):
         phase = 1.0 - current / self.rampup_length
         semnetic_weight = float(np.exp(-5.0 * phase * phase))
         print('epoch:{}, semantic weight{:.3f}:'.format(kwargs['epoch'], semnetic_weight))
+        # gather all losses
         losses = dict()
         losses['loss_contra_single'] = loss_single * self.loss_lambda
         losses['loss_contra_dense'] = loss_dense * self.loss_lambda
