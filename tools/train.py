@@ -123,7 +123,7 @@ def main():
 
     datasets = [build_dataset(cfg.data.train)]
 
-    if cfg.model.type == 'DenseSpatialCL':
+    if 'Spatial' in cfg.model.type:
         cfg.model.bag_idxs = datasets[0].data_source.bag_idxs
         cfg.model.x_coords = datasets[0].data_source.x_coords
         cfg.model.y_coords = datasets[0].data_source.y_coords

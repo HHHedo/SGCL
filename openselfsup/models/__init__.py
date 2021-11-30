@@ -15,3 +15,5 @@ from .relative_loc import RelativeLoc
 from .simclr import SimCLR
 from .densecl import DenseCL
 from .densespatialcl import DenseSpatialCL
+from .densespatial2hcl import DenseSpatial2hCL
+from .spatial2hcl import Spatial2hCL
