@@ -22,7 +22,8 @@ class DenseSpatial2hCL(nn.Module):
                  queue_len=65536,
                  feat_dim=128,
                  momentum=0.999,
-                 loss_lambda=0.5,
+                 loss_lambda_dense=0.5,
+                 loss_lambda_spatial=0.5,
                  memory_bank=None, 
                  bag_idxs = None,
                  x_coords = None,
@@ -45,7 +46,8 @@ class DenseSpatial2hCL(nn.Module):
 
         self.queue_len = queue_len
         self.momentum = momentum
-        self.loss_lambda = loss_lambda
+        self.loss_lambda_dense = loss_lambda_dense
+        self.loss_lambda_spatial = loss_lambda_spatial
 
         # create the queue
         self.register_buffer("queue", torch.randn(feat_dim, queue_len))
@@ -59,6 +61,7 @@ class DenseSpatial2hCL(nn.Module):
         self.register_buffer('bag_idxs', torch.tensor(bag_idxs))
         self.register_buffer('x_coords', torch.tensor(x_coords))
         self.register_buffer('y_coords', torch.tensor(y_coords))
+        self.register_buffer('coords_bank', torch.stack((self.x_coords, self.y_coords),dim=1).float())
         self.rampup_length = rampup_length
         self.similar=similar
 
@@ -185,13 +188,12 @@ class DenseSpatial2hCL(nn.Module):
         chosen_patch_idx = (torch.eq(self.bag_idxs, bag_idx.unsqueeze(-1).expand((-1, self.bag_idxs.shape[0]))))
         # get coords 
         coords = torch.stack((x_coord, y_coord),dim=1).float() # b*2
-        coords_bank = torch.stack((self.x_coords, self.y_coords),dim=1).float() # ndata*2
-        distance = torch.cdist(coords, coords_bank, p=2) # b*ndata
+        # coords_bank = torch.stack((self.x_coords, self.y_coords),dim=1).float() # ndata*2
+        distance = torch.cdist(coords, self.coords_bank, p=2) # b*ndata
         distance = (distance < self.dis_threshold) & (0 < distance) 
         pos_idx = chosen_patch_idx * distance # (batch_size, ndata)， 01mask of chosen index
         s_pos_spatial = torch.sum(torch.where(pos_idx, s_all, torch.zeros_like(s_all)), dim=1)  # (batch_size) sum of similarity
         return s_pos_spatial, pos_idx 
-
 
     def _simi_ir(self, s_all, q, q_idx, neighbour_idx):
         memory = self.memory_bank.feature_bank.clone().detach()
@@ -250,11 +252,11 @@ class DenseSpatial2hCL(nn.Module):
         curr_close_nei = torch.eq(batch_labels, top_cluster_labels) # (2*batch_size, topk)
         return curr_close_nei.byte()
     
-    @torch.no_grad()
+    
     def _hard_mining(self, all_dps, outputs, idx, spatial_pos_idx,semantric_pos_idx):
         ir_pos_idx = torch.zeros(outputs.shape[0], self.memory_bank.feature_bank.shape[0]).cuda().scatter(1, idx.view(-1,1), 1)
         pos_idx = ir_pos_idx.byte() | spatial_pos_idx.byte() | semantric_pos_idx.byte()
-        # all_dps = torch.exp(torch.einsum('bc,cn->bn', [outputs, self.memory_bank.feature_bank.T])/self.head.temperature) # (batch_size, ndata)
+        # all_dps = torch.einsum('bc,cn->bn', [outputs, self.memory_bank.feature_bank.T]) # (batch_size, ndata)
         all_dps = (1 - pos_idx) * all_dps
         batch_size, ndata = all_dps.shape
         back_nei_dps, back_nei_idx = torch.topk(all_dps, k=int(0.2*ndata), sorted=True, dim=1) #(batch_size, 0.2*ndata)
@@ -333,7 +335,10 @@ class DenseSpatial2hCL(nn.Module):
         # Cal all similarities(s_all): dot product/T
         l_all = torch.einsum('bc,cn->bn', [q3, self.memory_bank.feature_bank.clone().detach().T])
         s_all = torch.exp(l_all/self.head.temperature)
-        
+
+        pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
+        # l_pos_npid_not = torch.einsum('nc,nc->n', [pos_feat, q3]).unsqueeze(-1)
+        l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q3])/self.head.temperature)
         # + spatial 
         s_pos_spatial, spatial_pos_idx = self._spatial_ir(s_all, bag_idx, x_coord, y_coord)
         # + semantic
@@ -345,6 +350,9 @@ class DenseSpatial2hCL(nn.Module):
         # semantic loss
         similar_fraction = s_pos_semantic/(s_pos_semantic + s_mining_negs.unsqueeze(-1))  # (batch_size, ndata)
         loss_semantic = -torch.mean(torch.log(torch.sum(nn.functional.normalize(similar_fraction, p=0), dim=1) + 1e-7))
+        #NPID
+        # loss_npid = self.head(l_pos_npid_not, l_neg_npid)['loss_contra']
+        loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
         # InfoNCE
         loss_single = self.head(l_pos, l_neg)['loss_contra']
         # Dense Loss
@@ -358,10 +366,13 @@ class DenseSpatial2hCL(nn.Module):
             print('epoch:{}, semantic weight{:.3f}:'.format(kwargs['epoch'], semnetic_weight))
         # gather all losses
         losses = dict()
-        losses['loss_contra_single'] = loss_single * self.loss_lambda
-        losses['loss_contra_dense'] = loss_dense * self.loss_lambda
-        losses['loss_contra_spatial'] = loss_spatial * 0.5 * semnetic_weight
-        losses['loss_contra_sementic'] = loss_semantic * 0.5 * semnetic_weight
+        losses['loss_contra_single'] = loss_single * self.loss_lambda_dense
+        losses['loss_contra_dense'] = loss_dense * self.loss_lambda_dense
+        losses['loss_contra_spatial'] = loss_spatial * semnetic_weight * self.loss_lambda_spatial
+        losses['loss_contra_sementic'] = loss_semantic * semnetic_weight * self.loss_lambda_spatial
+        losses['loss_npid'] = loss_npid * self.loss_lambda_spatial
+        # for ablation
+        # losses['loss_npid'] = loss_npid * 0
         self._dequeue_and_enqueue(k)
         self._dequeue_and_enqueue2(k2)
         # update memory bank

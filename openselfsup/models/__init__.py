@@ -17,3 +17,4 @@ from .densecl import DenseCL
 from .densespatialcl import DenseSpatialCL
 from .densespatial2hcl import DenseSpatial2hCL
 from .spatial2hcl import Spatial2hCL
+from .spatialcl import SpatialCL

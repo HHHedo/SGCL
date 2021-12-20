@@ -250,7 +250,6 @@ class DenseSpatialCL(nn.Module):
         curr_close_nei = torch.eq(batch_labels, top_cluster_labels) # (2*batch_size, topk)
         return curr_close_nei.byte()
     
-    @torch.no_grad()
     def _hard_mining(self, all_dps, outputs, idx, spatial_pos_idx,semantric_pos_idx):
         ir_pos_idx = torch.zeros(outputs.shape[0], self.memory_bank.feature_bank.shape[0]).cuda().scatter(1, idx.view(-1,1), 1)
         pos_idx = ir_pos_idx.byte() | spatial_pos_idx.byte() | semantric_pos_idx.byte()

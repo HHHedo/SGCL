@@ -1,13 +1,9 @@
 _base_ = '../../base.py'
 # model settings
 model = dict(
-    type='DenseSpatial2hCL',
+    type='SpatialCL',
     pretrained=None,
-    queue_len=65536,
-    feat_dim=128,
-    momentum=0.999,
-    loss_lambda_dense=1,
-    loss_lambda_spatial=1/3,
+    loss_lambda=1/3,
     rampup_length=10,
     similar=True,
     backbone=dict(
@@ -16,13 +12,18 @@ model = dict(
         in_channels=3,
         out_indices=[4],  # 0: conv-1, x: stage-x
         norm_cfg=dict(type='BN')),
+    # neck=dict(
+    #     type='LinearNeck',
+    #     in_channels=512,
+    #     out_channels=128,
+    #     with_avg_pool=True),
     neck=dict(
-        type='DenseNPIDCLNeck',
+        type='NonLinearNeckV1',
         in_channels=512,
         hid_channels=512,
         out_channels=128,
-        num_grid=None),
-    head=dict(type='ContrastiveHead', temperature=0.2), 
+        with_avg_pool=True),
+    # head=dict(type='ContrastiveHead', temperature=0.2), 
      memory_bank=dict(
         type='SimpleMemory', length=681486, feat_dim=128, momentum=0.5))
 # dataset settings
@@ -32,7 +33,7 @@ data_source_cfg = dict(
     mclient_path='/mnt/lustre/share/memcached_client')
 data_train_list = 'data/camelyon/meta/train_selected.txt'
 data_train_root = '/remote-home/share/DATA/CAMELYON16/DATA/train'
-dataset_type = 'ContrastiveSpatialDataset'
+dataset_type = 'NPIDSpatialDataset'
 img_norm_cfg = dict(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 train_pipeline = [
     dict(type='RandomResizedCrop', size=224, scale=(0.2, 1.)),

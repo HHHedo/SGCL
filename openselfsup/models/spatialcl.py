@@ -8,7 +8,7 @@ from .registry import MODELS
 import numpy as np
 
 @MODELS.register_module
-class Spatial2hCL(nn.Module):
+class SpatialCL(nn.Module):
     '''Spatial2hCL.
     Part of the code is borrowed from:
         "https://github.com/facebookresearch/moco/blob/master/moco/builder.py".
@@ -17,11 +17,7 @@ class Spatial2hCL(nn.Module):
     def __init__(self,
                  backbone,
                  neck=None,
-                 head=None,
                  pretrained=None,
-                 queue_len=65536,
-                 feat_dim=128,
-                 momentum=0.999,
                  loss_lambda=0.5,
                  memory_bank=None, 
                  bag_idxs = None,
@@ -30,26 +26,15 @@ class Spatial2hCL(nn.Module):
                  rampup_length = None,
                  similar=None,
                  **kwargs):
-        super(Spatial2hCL, self).__init__()
-        self.encoder_q = nn.Sequential(
-            builder.build_backbone(backbone), builder.build_neck(neck))
-        self.encoder_k = nn.Sequential(
-            builder.build_backbone(backbone), builder.build_neck(neck))
-        self.backbone = self.encoder_q[0]
-        for param in self.encoder_k.parameters():
-            param.requires_grad = False
-        self.head = builder.build_head(head)
-        if memory_bank is not None:
-            self.memory_bank = builder.build_memory(memory_bank) 
+        super(SpatialCL, self).__init__()
+        self.backbone = builder.build_backbone(backbone)
+        self.neck = builder.build_neck(neck)
+        # self.head = builder.build_head(head)
+        self.memory_bank = builder.build_memory(memory_bank)
         self.init_weights(pretrained=pretrained)
-
-        self.queue_len = queue_len
-        self.momentum = momentum
         self.loss_lambda = loss_lambda
 
         # create the queue
-        self.register_buffer("queue", torch.randn(feat_dim, queue_len))
-        self.queue = nn.functional.normalize(self.queue, dim=0)
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
         self.register_buffer('bag_idxs', torch.tensor(bag_idxs))
@@ -81,85 +66,9 @@ class Spatial2hCL(nn.Module):
     def init_weights(self, pretrained=None):
         if pretrained is not None:
             print_log('load model from: {}'.format(pretrained), logger='root')
-        self.encoder_q[0].init_weights(pretrained=pretrained)
-        self.encoder_q[1].init_weights(init_linear='kaiming')
-        for param_q, param_k in zip(self.encoder_q.parameters(),
-                                    self.encoder_k.parameters()):
-            param_k.data.copy_(param_q.data)
+        self.backbone.init_weights(pretrained=pretrained)
+        self.neck.init_weights(init_linear='kaiming')
 
-    @torch.no_grad()
-    def _momentum_update_key_encoder(self):
-        """
-        Momentum update of the key encoder
-        """
-        for param_q, param_k in zip(self.encoder_q.parameters(),
-                                    self.encoder_k.parameters()):
-            param_k.data = param_k.data * self.momentum + \
-                           param_q.data * (1. - self.momentum)
-
-    @torch.no_grad()
-    def _dequeue_and_enqueue(self, keys):
-        # gather keys before updating queue
-        keys = concat_all_gather(keys)
-
-        batch_size = keys.shape[0]
-
-        ptr = int(self.queue_ptr)
-        assert self.queue_len % batch_size == 0  # for simplicity
-
-        # replace the keys at ptr (dequeue and enqueue)
-        self.queue[:, ptr:ptr + batch_size] = keys.transpose(0, 1)
-        ptr = (ptr + batch_size) % self.queue_len  # move pointer
-
-        self.queue_ptr[0] = ptr
-
-
-    @torch.no_grad()
-    def _batch_shuffle_ddp(self, x):
-        """
-        Batch shuffle, for making use of BatchNorm.
-        *** Only support DistributedDataParallel (DDP) model. ***
-        """
-        # gather from all gpus
-        batch_size_this = x.shape[0]
-        x_gather = concat_all_gather(x)
-        batch_size_all = x_gather.shape[0]
-
-        num_gpus = batch_size_all // batch_size_this
-
-        # random shuffle index
-        idx_shuffle = torch.randperm(batch_size_all).cuda()
-
-        # broadcast to all gpus
-        torch.distributed.broadcast(idx_shuffle, src=0)
-
-        # index for restoring
-        idx_unshuffle = torch.argsort(idx_shuffle)
-
-        # shuffled index for this gpu
-        gpu_idx = torch.distributed.get_rank()
-        idx_this = idx_shuffle.view(num_gpus, -1)[gpu_idx]
-
-        return x_gather[idx_this], idx_unshuffle
-
-    @torch.no_grad()
-    def _batch_unshuffle_ddp(self, x, idx_unshuffle):
-        """
-        Undo batch shuffle.
-        *** Only support DistributedDataParallel (DDP) model. ***
-        """
-        # gather from all gpus
-        batch_size_this = x.shape[0]
-        x_gather = concat_all_gather(x)
-        batch_size_all = x_gather.shape[0]
-
-        num_gpus = batch_size_all // batch_size_this
-
-        # restored index for this gpu
-        gpu_idx = torch.distributed.get_rank()
-        idx_this = idx_unshuffle.view(num_gpus, -1)[gpu_idx]
-
-        return x_gather[idx_this]
 
     def _spatial_ir(self, s_all, bag_idx, x_coord, y_coord):
         # get WSIs (batch_size, ndata)
@@ -231,6 +140,7 @@ class Spatial2hCL(nn.Module):
         curr_close_nei = torch.eq(batch_labels, top_cluster_labels) # (2*batch_size, topk)
         return curr_close_nei.byte()
     
+    
     def _hard_mining(self, all_dps, outputs, idx, spatial_pos_idx,semantric_pos_idx):
         ir_pos_idx = torch.zeros(outputs.shape[0], self.memory_bank.feature_bank.shape[0]).cuda().scatter(1, idx.view(-1,1), 1)
         pos_idx = ir_pos_idx.byte() | spatial_pos_idx.byte() | semantric_pos_idx.byte()
@@ -249,59 +159,35 @@ class Spatial2hCL(nn.Module):
         self.cluster = cluster_labels.cuda()
 
     def forward_train(self, img, idx, bag_idx, x_coord, y_coord, **kwargs):
-        assert img.dim() == 5, \
-            "Input must have 5 dims, got: {}".format(img.dim())
-        im_q = img[:, 0, ...].contiguous()
-        im_k = img[:, 1, ...].contiguous()
-        # compute query features
-        q, q1 = self.encoder_q(im_q)
-        q = nn.functional.normalize(q, dim=1)
-        q1 = nn.functional.normalize(q1, dim=1)
-        
-        # compute key features
-        with torch.no_grad():  # no gradient to keys
-            self._momentum_update_key_encoder()  # update the key encoder
-
-            # shuffle for making use of BN
-            im_k, idx_unshuffle = self._batch_shuffle_ddp(im_k)
-
-            k = self.encoder_k(im_k)[0]  # keys: NxC
-            k = nn.functional.normalize(k, dim=1)
-
-            # undo shuffle
-            k = self._batch_unshuffle_ddp(k, idx_unshuffle)
-
-        # compute logits
-        # Einstein sum is more intuitive
-        # positive logits: Nx1
-        l_pos = torch.einsum('nc,nc->n', [q, k]).unsqueeze(-1)
-        # negative logits: NxK
-        l_neg = torch.einsum('nc,ck->nk', [q, self.queue.clone().detach()])
+        x = self.backbone(img)
+        idx = idx.cuda()
+        q = self.neck(x)[0]
+        q = nn.functional.normalize(q)  # BxC
 
         
         # Cal all logits(l_all): dot product without /T
         # Cal all similarities(s_all): dot product/T
-        l_all = torch.einsum('bc,cn->bn', [q1, self.memory_bank.feature_bank.clone().detach().T])
-        s_all = torch.exp(l_all/self.head.temperature)
+        l_all = torch.einsum('bc,cn->bn', [q, self.memory_bank.feature_bank.clone().detach().T])
+        s_all = torch.exp(l_all/0.2)
         
+
         # + spatial 
         s_pos_spatial, spatial_pos_idx = self._spatial_ir(s_all, bag_idx, x_coord, y_coord)
         # + semantic
-        s_pos_semantic, semantric_pos_idx = self._simi_ir(s_all, q1, idx, spatial_pos_idx) # (batch_size, ndata), similarity
+        s_pos_semantic, semantric_pos_idx = self._simi_ir(s_all, q, idx, spatial_pos_idx) # (batch_size, ndata), similarity
         # - hard mining
-        s_mining_negs = self._hard_mining(s_all, q1, idx, spatial_pos_idx, semantric_pos_idx) #(bs , k=4096), similarity
+        s_mining_negs = self._hard_mining(s_all, q, idx, spatial_pos_idx, semantric_pos_idx) #(bs , k=4096), similarity
         # spatial loss
         loss_spatial = -torch.mean(torch.log(s_pos_spatial/(s_pos_spatial + s_mining_negs) + 1e-7)) # (batch_size， 1)
         # semantic loss
         similar_fraction = s_pos_semantic/(s_pos_semantic + s_mining_negs.unsqueeze(-1))  # (batch_size, ndata)
         loss_semantic = -torch.mean(torch.log(torch.sum(nn.functional.normalize(similar_fraction, p=0), dim=1) + 1e-7))
         # InfoNCE
-        loss_single = self.head(l_pos, l_neg)['loss_contra']
-        # NPID
-        # pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
-        # l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q1])/self.head.temperature)
-        l_pos_npid =torch.gather(s_all, 1, idx.unsqueeze(-1))
+        pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
+        # l_pos_npid_not = torch.einsum('nc,nc->n', [pos_feat, q3]).unsqueeze(-1)
+        l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q])/0.2)
         loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
+
         # sementic_weight 
         current = np.clip(kwargs['epoch'], 0.0, self.rampup_length)
         phase = 1.0 - current / self.rampup_length
@@ -310,14 +196,13 @@ class Spatial2hCL(nn.Module):
             print('epoch:{}, semantic weight{:.3f}:'.format(kwargs['epoch'], semnetic_weight))
         # gather all losses
         losses = dict()
-        losses['loss_contra_single'] = loss_single 
+        losses['loss_contra_single'] = loss_npid * self.loss_lambda
         losses['loss_contra_spatial'] = loss_spatial * semnetic_weight * self.loss_lambda
         losses['loss_contra_sementic'] = loss_semantic  * semnetic_weight * self.loss_lambda
-        losses['loss_npid'] = loss_npid  * self.loss_lambda
-        self._dequeue_and_enqueue(k)
+        
         # update memory bank
         with torch.no_grad():
-            self.memory_bank.update(idx, q1.detach())
+            self.memory_bank.update(idx, q.detach())
         with torch.no_grad():
             # renew self.cluster
             # print('i=',i, 'rank=',torch.distributed.get_rank(),self.similar)
