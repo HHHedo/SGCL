@@ -77,6 +77,7 @@ class DenseSpatialCL(nn.Module):
         self.dis_threshold=2
         self.aux_num=3
         self.k=4096
+        self.nei_k = int(self.k*2/(1+self.aux_num))
         self.kmeans = [no_clusters for _ in range(no_kmeans)]
         cluster_labels = torch.from_numpy(np.random.choice(range(no_clusters),ndata)).long()
         cluster_labels = cluster_labels.unsqueeze(0).repeat(no_kmeans, 1) # (no_kmeans, ndata)
@@ -215,14 +216,15 @@ class DenseSpatialCL(nn.Module):
         # concatenate anchor and auxiliary anchor
         #scatter, dim=1, put src (all_close_nei_in_back(0,1)) by row with the idx (back_nei_idxs)
         pos_idx_scatter = torch.zeros(all_q.shape[0],neighbour_idx.shape[1]).cuda().scatter(1, back_nei_idxs, all_close_nei_in_back.float()) #(bs, ndata)
-        if self.aux_num == 1:
-            batch_idx_sca, q_idx_sca = torch.split(pos_idx_scatter, q.shape[0], dim=0) # 2*(batch_size, ndata)
-            batch_pos_idx = batch_idx_sca.byte() | q_idx_sca.byte() # (batch_size, ndata)
-        else:
-            idx_sca = torch.split(pos_idx_scatter, q.shape[0], dim=0) # tuple aux_num * (batch_size, ndata)
-            batch_pos_idx = idx_sca[0].byte()
-            for i in idx_sca[1:]:
-                batch_pos_idx = batch_pos_idx | i.byte()
+        batch_pos_idx = (torch.sum(pos_idx_scatter.view(self.aux_num+1, q.shape[0], -1), dim=0)>0).float()
+        # if self.aux_num == 1:
+        #     batch_idx_sca, q_idx_sca = torch.split(pos_idx_scatter, q.shape[0], dim=0) # 2*(batch_size, ndata)
+        #     batch_pos_idx = batch_idx_sca.byte() | q_idx_sca.byte() # (batch_size, ndata)
+        # else:
+        #     idx_sca = torch.split(pos_idx_scatter, q.shape[0], dim=0) # tuple aux_num * (batch_size, ndata)
+        #     batch_pos_idx = idx_sca[0].byte()
+        #     for i in idx_sca[1:]:
+        #         batch_pos_idx = batch_pos_idx | i.byte()
         pos_logits = s_all * batch_pos_idx # (batch_size, ndata)
         return pos_logits, batch_pos_idx  #exp(logit/T)
 
@@ -230,7 +232,7 @@ class DenseSpatialCL(nn.Module):
     def _get_aux_q(self, all_dps, memory, neighbour_idx):
         select_dps = neighbour_idx * all_dps # (batch_size, ndata)
         _, back_idx = torch.topk(select_dps, k=self.aux_num, sorted=False, dim=1) # (batch_size, aux_num)
-        back_idx = back_idx.view(-1)
+        back_idx = back_idx.T.reshape(-1)
         q = torch.index_select(memory, 0, back_idx.view(-1))
         return q, back_idx
 
@@ -239,14 +241,14 @@ class DenseSpatialCL(nn.Module):
         all_dps = torch.einsum('bc,cn->bn', [outputs, memory.T]) # (aux*batch_size, ndata)
         idx_scatter = torch.ones_like(all_dps).scatter(1, idx.unsqueeze(-1), 0) #ignore itself
         all_dps = idx_scatter * all_dps
-        back_nei_dps, back_nei_idxs = torch.topk(all_dps, k=self.k, sorted=False, dim=1)
+        back_nei_dps, back_nei_idxs = torch.topk(all_dps, k=self.nei_k, sorted=False, dim=1)
         return back_nei_dps, back_nei_idxs
 
     @torch.no_grad()
     def _get_close_nei_in_back(self, each_k_idx, back_nei_idxs, idx):
         batch_labels = self.cluster[each_k_idx][idx] # (2*batch_size)
         top_cluster_labels = self.cluster[each_k_idx][back_nei_idxs] # (2*batch_size, topk)
-        batch_labels = batch_labels.unsqueeze(1).expand(-1, self.k)
+        batch_labels = batch_labels.unsqueeze(1).expand(-1, self.nei_k)
         curr_close_nei = torch.eq(batch_labels, top_cluster_labels) # (2*batch_size, topk)
         return curr_close_nei.byte()
     
