@@ -1,0 +1,3 @@
+CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=29500 bash tools/dist_train.sh configs/selfsup/sslp/spatialcl.py 4
+python tools/extract_backbone_weights.py ./work_dirs/selfsup/sslp/spatialcl/epoch_100.pth pretrains/sslp_repro_full_r18_camelyon.pth 
+CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=29500 bash benchmarks/dist_train_linear.sh configs/benchmarks/linear_classification/camelyon/r18_last.py pretrains/sslp_repro_full_r18_camelyon.pth

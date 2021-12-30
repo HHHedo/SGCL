@@ -303,8 +303,8 @@ class Spatial2hCL(nn.Module):
         # NPID
         # pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
         # l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q1])/self.head.temperature)
-        l_pos_npid =torch.gather(s_all, 1, idx.unsqueeze(-1))
-        loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
+        # l_pos_npid =torch.gather(s_all, 1, idx.unsqueeze(-1))
+        # loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
         # sementic_weight 
         current = np.clip(kwargs['epoch'], 0.0, self.rampup_length)
         phase = 1.0 - current / self.rampup_length
@@ -313,10 +313,10 @@ class Spatial2hCL(nn.Module):
             print('epoch:{}, semantic weight{:.3f}:'.format(kwargs['epoch'], semnetic_weight))
         # gather all losses
         losses = dict()
-        losses['loss_contra_single'] = loss_single 
-        losses['loss_contra_spatial'] = loss_spatial * semnetic_weight * self.loss_lambda
-        losses['loss_contra_sementic'] = loss_semantic  * semnetic_weight * self.loss_lambda
-        losses['loss_npid'] = loss_npid  * self.loss_lambda
+        losses['loss_contra_single'] = loss_single * self.loss_lambda
+        losses['loss_contra_spatial'] = 0.5*loss_spatial * semnetic_weight * self.loss_lambda
+        losses['loss_contra_sementic'] = 0.5*loss_semantic  * semnetic_weight * self.loss_lambda
+        # losses['loss_npid'] = loss_npid  * self.loss_lambda
         self._dequeue_and_enqueue(k)
         # update memory bank
         with torch.no_grad():

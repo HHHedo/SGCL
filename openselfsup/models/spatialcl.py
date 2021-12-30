@@ -9,7 +9,7 @@ import numpy as np
 
 @MODELS.register_module
 class SpatialCL(nn.Module):
-    '''Spatial2hCL.
+    '''SpatialCL.
     Part of the code is borrowed from:
         "https://github.com/facebookresearch/moco/blob/master/moco/builder.py".
     '''
@@ -25,6 +25,7 @@ class SpatialCL(nn.Module):
                  y_coords = None,
                  rampup_length = None,
                  similar=None,
+                 temperature=0.07,
                  **kwargs):
         super(SpatialCL, self).__init__()
         self.backbone = builder.build_backbone(backbone)
@@ -33,13 +34,14 @@ class SpatialCL(nn.Module):
         self.memory_bank = builder.build_memory(memory_bank)
         self.init_weights(pretrained=pretrained)
         self.loss_lambda = loss_lambda
-
+        self.T = temperature
         # create the queue
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
         self.register_buffer('bag_idxs', torch.tensor(bag_idxs))
-        self.register_buffer('x_coords', torch.tensor(x_coords))
-        self.register_buffer('y_coords', torch.tensor(y_coords))
+        # self.register_buffer('x_coords', torch.tensor(x_coords))
+        # self.register_buffer('y_coords', torch.tensor(y_coords))
+        self.register_buffer('coords_bank', torch.stack(( torch.tensor(x_coords),torch.tensor(y_coords)),dim=1).float())
         self.rampup_length = rampup_length
         self.similar=similar
 
@@ -76,8 +78,9 @@ class SpatialCL(nn.Module):
         chosen_patch_idx = (torch.eq(self.bag_idxs, bag_idx.unsqueeze(-1).expand((-1, self.bag_idxs.shape[0]))))
         # get coords 
         coords = torch.stack((x_coord, y_coord),dim=1).float() # b*2
-        coords_bank = torch.stack((self.x_coords, self.y_coords),dim=1).float() # ndata*2
-        distance = torch.cdist(coords, coords_bank, p=2) # b*ndata
+        # coords_bank = torch.stack((self.x_coords, self.y_coords),dim=1).float() # ndata*2
+        # distance = torch.cdist(coords, coords_bank, p=2) # b*ndata
+        distance = torch.cdist(coords, self.coords_bank, p=2) # b*ndata
         distance = (distance < self.dis_threshold) & (0 < distance) 
         pos_idx = chosen_patch_idx * distance # (batch_size, ndata)， 01mask of chosen index
         s_pos_spatial = torch.sum(torch.where(pos_idx, s_all, torch.zeros_like(s_all)), dim=1)  # (batch_size) sum of similarity
@@ -90,13 +93,13 @@ class SpatialCL(nn.Module):
         aux_feat, aux_idx = self._get_aux_q(s_all, memory, neighbour_idx)
         all_q = torch.cat((q, aux_feat), dim=0)
         all_idx = torch.cat((q_idx, aux_idx))
-        # For each aux_anchor find the top-k samples
+        # For each aux_anchor find the top-k samples, kNN
         back_nei_dps, back_nei_idxs = self._get_neg_dot_products(all_q, memory, all_idx)
         # Filter by cluster labels multiple times
         all_close_nei_in_back = None
         no_kmeans = self.cluster.size(0)
         with torch.no_grad():
-            #sample postive sample
+            #sample postive sample, k-means
             for each_k_idx in range(no_kmeans):
                 curr_close_nei = self._get_close_nei_in_back(each_k_idx, back_nei_idxs, all_idx) # (self.aux_num*batch_size, topk)              
                 if all_close_nei_in_back is None:
@@ -128,7 +131,7 @@ class SpatialCL(nn.Module):
 
     @torch.no_grad()
     def _get_neg_dot_products(self, outputs, memory, idx):
-        all_dps = torch.einsum('bc,cn->bn', [outputs, memory.T]) # (aux*batch_size, ndata)
+        all_dps = torch.einsum('bc,nc->bn', [outputs, memory]) # (aux*batch_size, ndata)
         idx_scatter = torch.ones_like(all_dps).scatter(1, idx.unsqueeze(-1), 0) #ignore itself
         all_dps = idx_scatter * all_dps
         back_nei_dps, back_nei_idxs = torch.topk(all_dps, k=self.nei_k , sorted=False, dim=1)
@@ -169,9 +172,7 @@ class SpatialCL(nn.Module):
         
         # Cal all logits(l_all): dot product without /T
         # Cal all similarities(s_all): dot product/T
-        l_all = torch.einsum('bc,cn->bn', [q, self.memory_bank.feature_bank.clone().detach().T])
-        s_all = torch.exp(l_all/0.2)
-        
+        s_all = torch.exp(torch.einsum('bc,nc->bn', [q, self.memory_bank.feature_bank.clone().detach()])/self.T)
 
         # + spatial 
         s_pos_spatial, spatial_pos_idx = self._spatial_ir(s_all, bag_idx, x_coord, y_coord)
@@ -185,22 +186,26 @@ class SpatialCL(nn.Module):
         similar_fraction = s_pos_semantic/(s_pos_semantic + s_mining_negs.unsqueeze(-1))  # (batch_size, ndata)
         loss_semantic = -torch.mean(torch.log(torch.sum(nn.functional.normalize(similar_fraction, p=0), dim=1) + 1e-7))
         # InfoNCE
-        pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
+        # pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
         # l_pos_npid_not = torch.einsum('nc,nc->n', [pos_feat, q3]).unsqueeze(-1)
-        l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q])/0.2)
+        # l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q])/0.2)
+        # loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
+        l_pos_npid = torch.gather(s_all, 1, idx.unsqueeze(-1))
         loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
-
+       
         # sementic_weight 
         current = np.clip(kwargs['epoch'], 0.0, self.rampup_length)
         phase = 1.0 - current / self.rampup_length
         semnetic_weight = float(np.exp(-5.0 * phase * phase))
+        npid_weight = 1/(1 + semnetic_weight + semnetic_weight)
+        semnetic_weight = semnetic_weight/(1 + semnetic_weight + semnetic_weight)
         if kwargs['iter']==0 and torch.distributed.get_rank() == 0:
             print('epoch:{}, semantic weight{:.3f}:'.format(kwargs['epoch'], semnetic_weight))
         # gather all losses
         losses = dict()
-        losses['loss_contra_single'] = loss_npid * self.loss_lambda
-        losses['loss_contra_spatial'] = loss_spatial * semnetic_weight * self.loss_lambda
-        losses['loss_contra_sementic'] = loss_semantic  * semnetic_weight * self.loss_lambda
+        losses['loss_contra_single'] = loss_npid * npid_weight
+        losses['loss_contra_spatial'] = loss_spatial * semnetic_weight 
+        losses['loss_contra_sementic'] = loss_semantic  * semnetic_weight
         
         # update memory bank
         with torch.no_grad():

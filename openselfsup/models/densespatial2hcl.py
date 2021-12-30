@@ -338,9 +338,8 @@ class DenseSpatial2hCL(nn.Module):
         l_all = torch.einsum('bc,cn->bn', [q3, self.memory_bank.feature_bank.clone().detach().T])
         s_all = torch.exp(l_all/self.head.temperature)
 
-        pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
-        # l_pos_npid_not = torch.einsum('nc,nc->n', [pos_feat, q3]).unsqueeze(-1)
-        l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q3])/self.head.temperature)
+        # pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
+        # l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q3])/self.head.temperature)
         # + spatial 
         s_pos_spatial, spatial_pos_idx = self._spatial_ir(s_all, bag_idx, x_coord, y_coord)
         # + semantic
@@ -354,7 +353,7 @@ class DenseSpatial2hCL(nn.Module):
         loss_semantic = -torch.mean(torch.log(torch.sum(nn.functional.normalize(similar_fraction, p=0), dim=1) + 1e-7))
         #NPID
         # loss_npid = self.head(l_pos_npid_not, l_neg_npid)['loss_contra']
-        loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
+        # loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
         # InfoNCE
         loss_single = self.head(l_pos, l_neg)['loss_contra']
         # Dense Loss
@@ -370,9 +369,9 @@ class DenseSpatial2hCL(nn.Module):
         losses = dict()
         losses['loss_contra_single'] = loss_single * self.loss_lambda_dense
         losses['loss_contra_dense'] = loss_dense * self.loss_lambda_dense
-        losses['loss_contra_spatial'] = loss_spatial * semnetic_weight * self.loss_lambda_spatial
-        losses['loss_contra_sementic'] = loss_semantic * semnetic_weight * self.loss_lambda_spatial
-        losses['loss_npid'] = loss_npid * self.loss_lambda_spatial
+        losses['loss_contra_spatial'] = 0.5 * loss_spatial * semnetic_weight * self.loss_lambda_spatial
+        losses['loss_contra_sementic'] = 0.5 * loss_semantic * semnetic_weight * self.loss_lambda_spatial
+        # losses['loss_npid'] = loss_npid * self.loss_lambda_spatial
         # for ablation
         # losses['loss_npid'] = loss_npid * 0
         self._dequeue_and_enqueue(k)
