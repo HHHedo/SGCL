@@ -14,3 +14,4 @@ from .dataset_wrappers import ConcatDataset, RepeatDataset
 from .loader import DistributedGroupSampler, GroupSampler, build_dataloader
 from .registry import DATASETS
 from .npidspatial import NPIDSpatialDataset
+from .npidspatialmcrop import NPIDSpatialMcropDataset, JigsawDataset

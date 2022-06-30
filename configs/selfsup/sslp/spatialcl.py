@@ -3,10 +3,15 @@ _base_ = '../../base.py'
 model = dict(
     type='SpatialCL',
     pretrained=None,
-    loss_lambda=1/3,
+    loss_lambda=1/2,
     rampup_length=10,
     similar=True,
-    temperature=0.07,
+    no_clusters=1000, 
+    no_kmeans=3,
+    dis_threshold=3,
+    aux_num=1,
+    k=4096, #no. of negative samples
+    nei_k = int(4096*2/(1+1)), # change with k & aux_num
     backbone=dict(
         type='ResNet',
         depth=18,
@@ -24,7 +29,7 @@ model = dict(
     #     hid_channels=512,
     #     out_channels=128,
     #     with_avg_pool=True),
-    # head=dict(type='ContrastiveHead', temperature=0.2), 
+    head=dict(type='ContrastiveHead', temperature=0.07), 
      memory_bank=dict(
         type='SimpleMemory', length=681486, feat_dim=128, momentum=0.5))
 # dataset settings
@@ -58,7 +63,7 @@ test_pipeline = [
 data = dict(
     imgs_per_gpu=32,  # total 32*8=256
     workers_per_gpu=5,
-    drop_last=True,
+    # drop_last=True,
     train=dict(
         type=dataset_type,
         data_source=dict(

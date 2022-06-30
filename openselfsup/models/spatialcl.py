@@ -17,6 +17,7 @@ class SpatialCL(nn.Module):
     def __init__(self,
                  backbone,
                  neck=None,
+                 head=None,
                  pretrained=None,
                  loss_lambda=0.5,
                  memory_bank=None, 
@@ -25,16 +26,22 @@ class SpatialCL(nn.Module):
                  y_coords = None,
                  rampup_length = None,
                  similar=None,
-                 temperature=0.07,
+                #  temperature=0.07,
+                 no_clusters=1000,
+                 no_kmeans=3,
+                 dis_threshold=2,
+                 aux_num=1,
+                 k=4096,
+                 nei_k = 4096,
                  **kwargs):
         super(SpatialCL, self).__init__()
         self.backbone = builder.build_backbone(backbone)
         self.neck = builder.build_neck(neck)
-        # self.head = builder.build_head(head)
+        self.head = builder.build_head(head)
         self.memory_bank = builder.build_memory(memory_bank)
         self.init_weights(pretrained=pretrained)
         self.loss_lambda = loss_lambda
-        self.T = temperature
+        self.T = self.head.temperature
         # create the queue
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
 
@@ -55,12 +62,13 @@ class SpatialCL(nn.Module):
         self.pdf = count
         # TODO self.k: the number of neighbour samples; self.dis_threshold, the geometric range
         # self.aux_num: the number of aux anchors
-        no_clusters=1000
-        no_kmeans=3
-        self.dis_threshold=2
-        self.aux_num=3
-        self.k=4096
-        self.nei_k = int(self.k*2/(1+self.aux_num))
+        # no_clusters=1000
+        # no_kmeans=3
+        self.dis_threshold=dis_threshold
+        self.aux_num=aux_num
+        self.k=k
+        self.nei_k=nei_k
+        #init clustering
         self.kmeans = [no_clusters for _ in range(no_kmeans)]
         cluster_labels = torch.from_numpy(np.random.choice(range(no_clusters),ndata)).long()
         cluster_labels = cluster_labels.unsqueeze(0).repeat(no_kmeans, 1) # (no_kmeans, ndata)
@@ -141,23 +149,44 @@ class SpatialCL(nn.Module):
     def _get_close_nei_in_back(self, each_k_idx, back_nei_idxs, idx):
         batch_labels = self.cluster[each_k_idx][idx] # (2*batch_size)
         top_cluster_labels = self.cluster[each_k_idx][back_nei_idxs] # (2*batch_size, topk)
-        batch_labels = batch_labels.unsqueeze(1).expand(-1, self.nei_k )
+        batch_labels = batch_labels.unsqueeze(1).expand(-1, self.nei_k)
         curr_close_nei = torch.eq(batch_labels, top_cluster_labels) # (2*batch_size, topk)
         return curr_close_nei.byte()
     
     
-    def _hard_mining(self, all_dps, outputs, idx, spatial_pos_idx,semantric_pos_idx):
+    def _hard_mining(self, all_dps, outputs, idx, spatial_pos_idx, semantric_pos_idx):
         ir_pos_idx = torch.zeros(outputs.shape[0], self.memory_bank.feature_bank.shape[0]).cuda().scatter(1, idx.view(-1,1), 1)
-        pos_idx = ir_pos_idx.byte() | spatial_pos_idx.byte() | semantric_pos_idx.byte()
+        pos_idx_npid = ir_pos_idx.byte() 
+        pos_idx_spatial = ir_pos_idx.byte() | spatial_pos_idx.byte()
+        pos_idx_semantic = ir_pos_idx.byte() | spatial_pos_idx.byte() | semantric_pos_idx.byte()
         # all_dps = torch.exp(torch.einsum('bc,cn->bn', [outputs, self.memory_bank.feature_bank.T])/self.head.temperature) # (batch_size, ndata)
-        all_dps = (1 - pos_idx) * all_dps
+        #info
+        all_dps1 = (1 - pos_idx_semantic) * all_dps
         batch_size, ndata = all_dps.shape
-        back_nei_dps, back_nei_idx = torch.topk(all_dps, k=int(0.2*ndata), sorted=True, dim=1) #(batch_size, 0.2*ndata)
+        back_nei_dps, back_nei_idx = torch.topk(all_dps1, k=int(0.2*ndata), sorted=True, dim=1) #(batch_size, 0.2*ndata)
         # mining_dps = torch.narrow(back_nei_dps, 1, 0, self.k)
         select_index = torch.multinomial(self.pdf, self.k)
-        mining_dps = back_nei_dps[:, select_index] # (batch_size, k)
-        s_mining_negs = torch.sum(mining_dps, dim=1) #(bs , 1) 
-        return s_mining_negs
+        mining_dps_npid = back_nei_dps[:, select_index] # (batch_size, k)
+        # s_mining_negs_npid = torch.sum(torch.exp(mining_dps_npid/self.T), dim=1) #(bs , 1) 
+        #spatial
+        all_dps2 = (1 - pos_idx_semantic) * all_dps
+        batch_size, ndata = all_dps.shape
+        back_nei_dps, back_nei_idx = torch.topk(all_dps2, k=int(0.2*ndata), sorted=True, dim=1) #(batch_size, 0.2*ndata)
+        # mining_dps = torch.narrow(back_nei_dps, 1, 0, self.k)
+        select_index = torch.multinomial(self.pdf, self.k)
+        mining_dps_spatial = back_nei_dps[:, select_index] # (batch_size, k)
+        s_mining_negs_spatial = torch.sum(torch.exp(mining_dps_spatial/self.T), dim=1) #(bs ) 
+        #semantic
+        all_dps3 = (1 - pos_idx_semantic) * all_dps
+        batch_size, ndata = all_dps.shape
+        back_nei_dps, back_nei_idx = torch.topk(all_dps3, k=int(0.2*ndata), sorted=True, dim=1) #(batch_size, 0.2*ndata)
+        # mining_dps = torch.narrow(back_nei_dps, 1, 0, self.k)
+        select_index = torch.multinomial(self.pdf, self.k)
+        mining_dps_semantic = back_nei_dps[:, select_index] # (batch_size, k)
+        s_mining_negs_semantic = torch.sum(torch.exp(mining_dps_semantic/self.T), dim=1) #(bs ) 
+        s_spatial_sementic = torch.sum(torch.exp(((spatial_pos_idx.byte()|semantric_pos_idx.byte())*all_dps)/self.T),dim=1)
+        s_whole = s_spatial_sementic + s_mining_negs_semantic
+        return mining_dps_npid, s_mining_negs_spatial, s_mining_negs_semantic, s_whole
 
     @torch.no_grad()
     def _cluster_update(self, cluster_labels):
@@ -167,49 +196,77 @@ class SpatialCL(nn.Module):
         x = self.backbone(img)
         idx = idx.cuda()
         q = self.neck(x)[0]
+        bs, feat_dim = q.shape[:2]
         q = nn.functional.normalize(q)  # BxC
-
+        # bs, feat_dim = q.shape[:2]
         
         # Cal all logits(l_all): dot product without /T
         # Cal all similarities(s_all): dot product/T
-        s_all = torch.exp(torch.einsum('bc,nc->bn', [q, self.memory_bank.feature_bank.clone().detach()])/self.T)
-
+        
+        d_all = torch.einsum('bc,nc->bn', [q, self.memory_bank.feature_bank.clone().detach()])
+        s_all = torch.exp(d_all/self.T)
         # + spatial 
         s_pos_spatial, spatial_pos_idx = self._spatial_ir(s_all, bag_idx, x_coord, y_coord)
         # + semantic
         s_pos_semantic, semantric_pos_idx = self._simi_ir(s_all, q, idx, spatial_pos_idx) # (batch_size, ndata), similarity
         # - hard mining
-        s_mining_negs = self._hard_mining(s_all, q, idx, spatial_pos_idx, semantric_pos_idx) #(bs , k=4096), similarity
+        neg_logits, s_mining_negs_spatial, s_mining_negs_semantic, s_whole = self._hard_mining(d_all, q, idx, spatial_pos_idx, semantric_pos_idx) #(bs , k=4096), similarity
         # spatial loss
-        loss_spatial = -torch.mean(torch.log(s_pos_spatial/(s_pos_spatial + s_mining_negs) + 1e-7)) # (batch_size， 1)
+        loss_spatial = -torch.mean(torch.log(s_pos_spatial/(s_pos_spatial + s_mining_negs_spatial) + 1e-7)) # ()
         # semantic loss
-        similar_fraction = s_pos_semantic/(s_pos_semantic + s_mining_negs.unsqueeze(-1))  # (batch_size, ndata)
-        loss_semantic = -torch.mean(torch.log(torch.sum(nn.functional.normalize(similar_fraction, p=0), dim=1) + 1e-7))
+        similar_fraction = s_pos_semantic/(s_pos_semantic + s_mining_negs_semantic.unsqueeze(-1))  # (batch_size, ndata)
+        loss_semantic = -torch.mean(torch.log(torch.sum(similar_fraction, dim=1) + 1e-7))
         # InfoNCE
-        # pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
+        pos_feat = torch.index_select(self.memory_bank.feature_bank, 0, idx)
+        pos_logits = torch.einsum('nc,nc->n',
+                                  [pos_feat, q]).unsqueeze(-1)
+        loss_npid = self.head(pos_logits, neg_logits)['loss_contra']  # ()
         # l_pos_npid_not = torch.einsum('nc,nc->n', [pos_feat, q3]).unsqueeze(-1)
         # l_pos_npid = torch.exp(torch.einsum('nc,nc->n', [pos_feat, q])/0.2)
         # loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
-        l_pos_npid = torch.gather(s_all, 1, idx.unsqueeze(-1))
-        loss_npid = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
-       
+        # l_pos_npid = torch.gather(s_all, 1, idx.unsqueeze(-1))
+        # loss_npid_1 = -torch.mean(torch.log(l_pos_npid/(l_pos_npid + s_mining_negs) + 1e-7))
+
+        # neg_idx = self.memory_bank.multinomial.draw(bs * self.neg_num)
+        # # neg_idx = neg_idx.view(bs, -1)
+        # # while True:
+        # #     wrong = (neg_idx == idx.view(-1, 1))
+        # #     if wrong.sum().item() > 0:
+        # #         neg_idx[wrong] = self.memory_bank.multinomial.draw(
+        # #             wrong.sum().item())
+        # #     else:
+        # #         break
+        # # neg_idx = neg_idx.flatten()
+        # pos_feat = torch.index_select(self.memory_bank.feature_bank, 0,
+        #                               idx)  # BXC
+        # neg_feat = torch.index_select(self.memory_bank.feature_bank, 0,
+        #                               neg_idx).view(bs, self.neg_num,
+        #                                             feat_dim)  # BxKxC
+        # pos_logits = torch.einsum('nc,nc->n',
+        #                           [pos_feat, q]).unsqueeze(-1)
+        # neg_logits = torch.bmm(neg_feat, q.unsqueeze(2)).squeeze(2)
+
+        # loss_npid = self.head(pos_logits, neg_logits)
+        # s_spatial_numerator = s_pos_spatial + s_pos_semantic
+        # loss_spatial = -torch.mean(torch.log(s_spatial_numerator/s_whole + 1e-7))
+
         # sementic_weight 
         current = np.clip(kwargs['epoch'], 0.0, self.rampup_length)
         phase = 1.0 - current / self.rampup_length
         semnetic_weight = float(np.exp(-5.0 * phase * phase))
-        npid_weight = 1/(1 + semnetic_weight + semnetic_weight)
-        semnetic_weight = semnetic_weight/(1 + semnetic_weight + semnetic_weight)
+        # npid_weight = 1/(1 + semnetic_weight + semnetic_weight)
+        # semnetic_weight = semnetic_weight/(1 + semnetic_weight + semnetic_weight)
         if kwargs['iter']==0 and torch.distributed.get_rank() == 0:
             print('epoch:{}, semantic weight{:.3f}:'.format(kwargs['epoch'], semnetic_weight))
         # gather all losses
         losses = dict()
-        losses['loss_contra_single'] = loss_npid * npid_weight
-        losses['loss_contra_spatial'] = loss_spatial * semnetic_weight 
-        losses['loss_contra_sementic'] = loss_semantic  * semnetic_weight
-        
-        # update memory bank
-        with torch.no_grad():
-            self.memory_bank.update(idx, q.detach())
+        # losses['loss_contra_single'] = loss_npid * npid_weight
+        # losses['loss_contra_spatial'] = loss_spatial * semnetic_weight 
+        # losses['loss_contra_sementic'] = loss_semantic  * semnetic_weight
+        losses['loss_contra_single'] = loss_npid 
+        losses['loss_contra_spatial'] = loss_spatial * semnetic_weight
+        losses['loss_contra_sementic'] = loss_semantic  * semnetic_weight 
+            
         with torch.no_grad():
             # renew self.cluster
             # print('i=',i, 'rank=',torch.distributed.get_rank(),self.similar)
@@ -218,6 +275,8 @@ class SpatialCL(nn.Module):
                 km = Kmeans(self.kmeans, self.memory_bank.feature_bank, [1,2,3])
                 cluster_labels = km.compute_clusters()
                 self._cluster_update(cluster_labels)
+            # update memory bank
+            self.memory_bank.update(idx, q.detach())
         return losses
 
 

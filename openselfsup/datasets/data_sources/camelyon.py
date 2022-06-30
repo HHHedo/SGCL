@@ -3,7 +3,7 @@ from PIL import Image
 
 from ..registry import DATASOURCES
 from .utils import McLoader
-
+import pickle
 
 @DATASOURCES.register_module
 class Camelyon(object):
@@ -29,6 +29,7 @@ class Camelyon(object):
         self.memcached = memcached
         self.mclient_path = mclient_path
         self.initialized = False
+        # self.redis = redis
 
     def _init_memcached(self):
         if not self.initialized:
@@ -44,6 +45,8 @@ class Camelyon(object):
             self._init_memcached()
         if self.memcached:
             img = self.mc_loader(self.fns[idx])
+        # elif self.redis:
+        #     img=pickle.loads(self.redis.get(self.fns[idx]))
         else:
             img = Image.open(self.fns[idx])
         # print(idx, self.fns[idx])

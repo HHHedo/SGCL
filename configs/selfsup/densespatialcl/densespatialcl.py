@@ -6,7 +6,7 @@ model = dict(
     queue_len=65536,
     feat_dim=128,
     momentum=0.999,
-    loss_lambda=1,
+    loss_lambda=0.5,
     rampup_length=10,
     similar=True,
     backbone=dict(
@@ -23,7 +23,10 @@ model = dict(
         num_grid=None),
     head=dict(type='ContrastiveHead', temperature=0.2), 
      memory_bank=dict(
-        type='SimpleMemory', length=681486, feat_dim=128, momentum=0.5))
+        type='SimpleMemory', length=681486, feat_dim=128, momentum=1),
+    memory_bank_b=dict(
+        type='SimpleMemory', length=681486, feat_dim=512, momentum=1)
+    )
 # dataset settings
 data_source_cfg = dict(
     type='Camelyon',
@@ -35,27 +38,13 @@ dataset_type = 'ContrastiveSpatialDataset'
 img_norm_cfg = dict(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 train_pipeline = [
     dict(type='RandomResizedCrop', size=224, scale=(0.2, 1.)),
-    dict(
-        type='RandomAppliedTrans',
-        transforms=[
-            dict(
-                type='ColorJitter',
-                brightness=0.4,
-                contrast=0.4,
-                saturation=0.4,
-                hue=0.1)
-        ],
-        p=0.8),
     dict(type='RandomGrayscale', p=0.2),
     dict(
-        type='RandomAppliedTrans',
-        transforms=[
-            dict(
-                type='GaussianBlur',
-                sigma_min=0.1,
-                sigma_max=2.0)
-        ],
-        p=0.5),
+        type='ColorJitter',
+        brightness=0.4,
+        contrast=0.4,
+        saturation=0.4,
+        hue=0.4),
     dict(type='RandomHorizontalFlip'),
     dict(type='ToTensor'),
     dict(type='Normalize', **img_norm_cfg),

@@ -9,6 +9,13 @@ model = dict(
     loss_lambda=1/2,
     rampup_length=10,
     similar=True,
+    no_clusters=1000, 
+    no_kmeans=3,
+    dis_threshold=3,
+    aux_num=1,
+    k=65536, #no. of negative samples
+    nei_k = int(4096*2/(1+1)), # change with k & aux_num
+   
     backbone=dict(
         type='ResNet',
         depth=18,
@@ -16,13 +23,23 @@ model = dict(
         out_indices=[4],  # 0: conv-1, x: stage-x
         norm_cfg=dict(type='BN')),
     neck=dict(
-        type='DoubleNonLinearNeckV1',
+        type='NonLinearNeckV11',
         in_channels=512,
         hid_channels=512,
         out_channels=128,),
+    # neck=dict(
+    #     type='NonLinearNeckV1',
+    #     in_channels=512,
+    #     hid_channels=512,
+    #     out_channels=128,
+    #     with_avg_pool=True),
     head=dict(type='ContrastiveHead', temperature=0.2), 
-     memory_bank=dict(
-        type='SimpleMemory', length=681486, feat_dim=128, momentum=0.5))
+    memory_bank=dict(
+        type='SimpleMemory', length=681486, feat_dim=128, momentum=1),
+    memory_bank_b=dict(
+        type='SimpleMemory', length=681486, feat_dim=512, momentum=1)
+    )
+    
 # dataset settings
 data_source_cfg = dict(
     type='Camelyon',
@@ -34,27 +51,34 @@ dataset_type = 'ContrastiveSpatialDataset'
 img_norm_cfg = dict(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 train_pipeline = [
     dict(type='RandomResizedCrop', size=224, scale=(0.2, 1.)),
+    # dict(
+    #     type='RandomAppliedTrans',
+    #     transforms=[
+    #         dict(
+    #             type='ColorJitter',
+    #             brightness=0.4,
+    #             contrast=0.4,
+    #             saturation=0.4,
+    #             hue=0.1)
+    #     ],
+    #     p=0.8),
     dict(
-        type='RandomAppliedTrans',
-        transforms=[
-            dict(
-                type='ColorJitter',
-                brightness=0.4,
-                contrast=0.4,
-                saturation=0.4,
-                hue=0.1)
-        ],
-        p=0.8),
+        type='ColorJitter',
+        brightness=0.4,
+        contrast=0.4,
+        saturation=0.4,
+        hue=0.4),
+    dict(type='RandomHorizontalFlip'),
     dict(type='RandomGrayscale', p=0.2),
-    dict(
-        type='RandomAppliedTrans',
-        transforms=[
-            dict(
-                type='GaussianBlur',
-                sigma_min=0.1,
-                sigma_max=2.0)
-        ],
-        p=0.5),
+    # dict(
+    #     type='RandomAppliedTrans',
+    #     transforms=[
+    #         dict(
+    #             type='GaussianBlur',
+    #             sigma_min=0.1,
+    #             sigma_max=2.0)
+    #     ],
+    #     p=0.5),
     dict(type='RandomHorizontalFlip'),
     dict(type='ToTensor'),
     dict(type='Normalize', **img_norm_cfg),

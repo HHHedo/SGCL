@@ -21,10 +21,11 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
             an operation defined in `oenselfsup.datasets.pipelines`.
     """
 
-    def __init__(self, data_source, pipeline):
+    def __init__(self, data_source, pipeline, num_views=None):
         self.data_source = build_datasource(data_source)
         pipeline = [build_from_cfg(p, PIPELINES) for p in pipeline]
         self.pipeline = Compose(pipeline)
+        self.num_views = num_views
 
     def __len__(self):
         return self.data_source.get_length()

@@ -1,11 +1,17 @@
 _base_ = '../../base.py'
 # model settings
 model = dict(
-    type='SpatialCL',
+    type='SpatialCL2',
     pretrained=None,
     loss_lambda=1/3,
     rampup_length=10,
     similar=True,
+    no_clusters=1000, 
+    no_kmeans=3,
+    dis_threshold=3,
+    aux_num=3,
+    k=4096, #no. of negative samples
+    nei_k = int(4096*2/(1+3)), # change with k & aux_num
     backbone=dict(
         type='ResNet',
         depth=18,
@@ -13,11 +19,11 @@ model = dict(
         out_indices=[4],  # 0: conv-1, x: stage-x
         norm_cfg=dict(type='BN')),
     neck=dict(
-        type='DoubleNonLinearNeckV1',
+        type='LinearNeck',
         in_channels=512,
-        hid_channels=512,
-        out_channels=128,),
-    head=dict(type='ContrastiveHead', temperature=0.2), 
+        out_channels=128,
+        with_avg_pool=True),
+    head=dict(type='ContrastiveHead', temperature=0.07), 
      memory_bank=dict(
         type='SimpleMemory', length=681486, feat_dim=128, momentum=0.5))
 # dataset settings
@@ -31,35 +37,27 @@ dataset_type = 'NPIDSpatialDataset'
 img_norm_cfg = dict(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 train_pipeline = [
     dict(type='RandomResizedCrop', size=224, scale=(0.2, 1.)),
-    dict(
-        type='RandomAppliedTrans',
-        transforms=[
-            dict(
-                type='ColorJitter',
-                brightness=0.4,
-                contrast=0.4,
-                saturation=0.4,
-                hue=0.1)
-        ],
-        p=0.8),
     dict(type='RandomGrayscale', p=0.2),
     dict(
-        type='RandomAppliedTrans',
-        transforms=[
-            dict(
-                type='GaussianBlur',
-                sigma_min=0.1,
-                sigma_max=2.0)
-        ],
-        p=0.5),
+        type='ColorJitter',
+        brightness=0.4,
+        contrast=0.4,
+        saturation=0.4,
+        hue=0.4),
     dict(type='RandomHorizontalFlip'),
     dict(type='ToTensor'),
     dict(type='Normalize', **img_norm_cfg),
 ]
+test_pipeline = [
+    dict(type='Resize', size=256),
+    dict(type='CenterCrop', size=224),
+    dict(type='ToTensor'),
+    dict(type='Normalize', **img_norm_cfg),
+]
 data = dict(
-    imgs_per_gpu=8,  # total 32*8=256
-    workers_per_gpu=0,
-    drop_last=True,
+    imgs_per_gpu=4,  # total 32*8=256
+    workers_per_gpu=5,
+    # drop_last=True,
     train=dict(
         type=dataset_type,
         data_source=dict(

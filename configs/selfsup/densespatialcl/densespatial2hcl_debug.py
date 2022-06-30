@@ -6,9 +6,16 @@ model = dict(
     queue_len=65536,
     feat_dim=128,
     momentum=0.999,
-    loss_lambda=1,
+    loss_lambda_dense=1/2,
+    loss_lambda_spatial=1,
     rampup_length=10,
     similar=True,
+    no_clusters=1000, 
+    no_kmeans=3,
+    dis_threshold=3,
+    aux_num=1,
+    k=65536, #no. of negative samples
+    nei_k = int(4096*2/(1+1)), # change with k & aux_num
     backbone=dict(
         type='ResNet',
         depth=18,
@@ -22,8 +29,10 @@ model = dict(
         out_channels=128,
         num_grid=None),
     head=dict(type='ContrastiveHead', temperature=0.2), 
-     memory_bank=dict(
-        type='SimpleMemory', length=681486, feat_dim=128, momentum=0.5))
+    memory_bank=dict(
+        type='SimpleMemory', length=681486, feat_dim=128, momentum=0.5),
+    memory_bank_b=dict(
+        type='SimpleMemory', length=681486, feat_dim=512, momentum=0.5))
 # dataset settings
 data_source_cfg = dict(
     type='Camelyon',
@@ -61,8 +70,8 @@ train_pipeline = [
     dict(type='Normalize', **img_norm_cfg),
 ]
 data = dict(
-    imgs_per_gpu=8,  # total 32*8=256
-    workers_per_gpu=0,
+    imgs_per_gpu=32,  # total 32*8=256
+    workers_per_gpu=5,
     drop_last=True,
     train=dict(
         type=dataset_type,

@@ -56,8 +56,8 @@ custom_hooks = [
     dict(
         type='ValidateHook',
         dataset=data['val'],
-        initial=True,
-        interval=1,
+        initial=False,
+        interval=10,
         imgs_per_gpu=128,
         workers_per_gpu=4,
         eval_param=dict(topk=(1, 1), AUC=True))

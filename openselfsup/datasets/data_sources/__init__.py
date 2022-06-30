@@ -6,3 +6,4 @@ from .imagenet_lmdb import ImageNetLMDB
 from .places205 import Places205
 from .coco_lmdb import CocoLMDB
 from .camelyon import Camelyon
+from .nctcrc import NCTCRC

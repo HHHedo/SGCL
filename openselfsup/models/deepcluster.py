@@ -71,8 +71,10 @@ class DeepCluster(nn.Module):
         Returns:
             tuple[Tensor]: backbone outputs.
         """
+        print(img.shape)
         if self.with_sobel:
             img = self.sobel_layer(img)
+            print(img.shape)
         x = self.backbone(img)
         return x
 

@@ -57,7 +57,7 @@ train_pipeline = [
     dict(type='Normalize', **img_norm_cfg),
 ]
 data = dict(
-    imgs_per_gpu=32,  # total 32*8=256
+    imgs_per_gpu=4,  # total 32*8=256
     workers_per_gpu=4,
     drop_last=True,
     train=dict(

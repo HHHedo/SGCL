@@ -200,6 +200,7 @@ class DenseCL(nn.Module):
         densecl_sim_q = (q_grid * indexed_k_grid).sum(1) # NxS^2
 
         l_pos_dense = densecl_sim_q.view(-1).unsqueeze(-1) # NS^2X1
+        
 
         q_grid = q_grid.permute(0, 2, 1)
         q_grid = q_grid.reshape(-1, q_grid.size(2))

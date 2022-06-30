@@ -20,7 +20,8 @@ class SimpleMemory(nn.Module):
     def __init__(self, length, feat_dim, momentum, **kwargs):
         super(SimpleMemory, self).__init__()
         self.rank, self.num_replicas = get_dist_info()
-        self.feature_bank = torch.randn(length, feat_dim).cuda()
+        self.register_buffer('feature_bank', torch.randn(length, feat_dim))
+        # self.feature_bank = torch.randn(length, feat_dim).cuda()
         self.feature_bank = nn.functional.normalize(self.feature_bank)
         self.momentum = momentum
         self.multinomial = AliasMethod(torch.ones(length))

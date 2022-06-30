@@ -67,9 +67,12 @@ class ValidateHook(Hook):
         else:
             results = nondist_forward_collect(func, self.data_loader,
                                               len(self.dataset))
+        
         if runner.rank == 0:
             for name, val in results.items():
+                # print( torch.from_numpy(val)[:10], torch.from_numpy(val)[-10:])
                 self._evaluate(runner, torch.from_numpy(val), name)
+               
         runner.model.train()
 
     def _evaluate(self, runner, results, keyword):

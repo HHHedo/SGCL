@@ -198,6 +198,33 @@ class NonLinearNeckV1(nn.Module):
             x = self.avgpool(x)
         return [self.mlp(x.view(x.size(0), -1))]
 
+@NECKS.register_module
+class NonLinearNeckV11(nn.Module):
+    """The non-linear neck in MoCo v2: fc-relu-fc.
+    """
+
+    def __init__(self,
+                 in_channels,
+                 hid_channels,
+                 out_channels,
+                 with_avg_pool=True):
+        super(NonLinearNeckV11, self).__init__()
+        self.with_avg_pool = with_avg_pool
+        if with_avg_pool:
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, hid_channels), nn.ReLU(inplace=True),
+            nn.Linear(hid_channels, out_channels))
+
+    def init_weights(self, init_linear='normal'):
+        _init_weights(self, init_linear)
+
+    def forward(self, x):
+        assert len(x) == 1
+        x = x[0]
+        if self.with_avg_pool:
+            x = self.avgpool(x)
+        return [x.view(x.size(0), -1), self.mlp(x.view(x.size(0), -1))]
 
 @NECKS.register_module
 class NonLinearNeckV2(nn.Module):
@@ -476,3 +503,220 @@ class DoubleNonLinearNeckV1(nn.Module):
         if self.with_avg_pool:
             x = self.avgpool(x)
         return [self.mlp(x.view(x.size(0), -1)), self.mlp2(x.view(x.size(0), -1))]
+
+
+
+@NECKS.register_module
+class SwAVNeck(nn.Module):
+    """The non-linear neck of SwAV without bn & normalization: fc-relu-fc.
+
+    Args:
+        in_channels (int): Number of input channels.
+        hid_channels (int): Number of hidden channels.
+        out_channels (int): Number of output channels.
+        with_avg_pool (bool): Whether to apply the global average pooling after
+            backbone. Defaults to True.
+        with_l2norm (bool): whether to normalize the output after projection.
+            Defaults to True.
+        norm_cfg (dict): Dictionary to construct and config norm layer.
+            Defaults to dict(type='SyncBN').
+        init_cfg (dict or list[dict], optional): Initialization config dict.
+    """
+
+    def __init__(self,
+                 in_channels,
+                 hid_channels,
+                 out_channels,
+                 with_avg_pool=True,
+                 with_l2norm=False,
+                 ):
+        super(SwAVNeck, self).__init__()
+        self.with_avg_pool = with_avg_pool
+        self.with_l2norm = with_l2norm
+        if with_avg_pool:
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        if out_channels == 0:
+            self.projection_neck = None
+        elif hid_channels == 0:
+            self.projection_neck = nn.Linear(in_channels, out_channels)
+        else:
+            # self.bn = build_norm_layer(norm_cfg, hid_channels)[1]
+            self.projection_neck = nn.Sequential(
+                nn.Linear(in_channels, hid_channels),
+                nn.ReLU(inplace=True), nn.Linear(hid_channels, out_channels))
+
+    def init_weights(self, init_linear='normal'):
+        _init_weights(self, init_linear)
+        
+    def forward_projection(self, x):
+        if self.projection_neck is not None:
+            x = self.projection_neck(x)
+        if self.with_l2norm:
+            x = nn.functional.normalize(x, dim=1, p=2)
+        return x
+
+    def forward(self, x):
+        # forward computing
+        # x: list of feature maps, len(x) according to len(num_crops)
+        avg_out = []
+        for _x in x:
+            _x = _x[0]
+            if self.with_avg_pool:
+                _out = self.avgpool(_x)
+                avg_out.append(_out)
+        feat_vec = torch.cat(avg_out)  # [sum(num_crops) * N, C]
+        feat_vec = feat_vec.view(feat_vec.size(0), -1)
+        output = self.forward_projection(feat_vec)
+        return [output]
+
+
+@NECKS.register_module
+class DuSwAVNeck(nn.Module):
+    """The non-linear neck of SwAV without bn & normalization: fc-relu-fc.
+
+    Args:
+        in_channels (int): Number of input channels.
+        hid_channels (int): Number of hidden channels.
+        out_channels (int): Number of output channels.
+        with_avg_pool (bool): Whether to apply the global average pooling after
+            backbone. Defaults to True.
+        with_l2norm (bool): whether to normalize the output after projection.
+            Defaults to True.
+        norm_cfg (dict): Dictionary to construct and config norm layer.
+            Defaults to dict(type='SyncBN').
+        init_cfg (dict or list[dict], optional): Initialization config dict.
+    """
+
+    def __init__(self,
+                 in_channels,
+                 hid_channels,
+                 out_channels,
+                 with_avg_pool=True,
+                 with_l2norm=False,
+                 ):
+        super(DuSwAVNeck, self).__init__()
+        self.with_avg_pool = with_avg_pool
+        self.with_l2norm = with_l2norm
+        if with_avg_pool:
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        if out_channels == 0:
+            self.projection_neck = None
+        elif hid_channels == 0:
+            self.projection_neck = nn.Linear(in_channels, out_channels)
+        else:
+            # self.bn = build_norm_layer(norm_cfg, hid_channels)[1]
+            self.projection_neck1 = nn.Sequential(
+                nn.Linear(in_channels, hid_channels),
+                nn.ReLU(inplace=True), nn.Linear(hid_channels, out_channels))
+            self.projection_neck2 = nn.Sequential(
+                nn.Linear(in_channels, hid_channels),
+                nn.ReLU(inplace=True), nn.Linear(hid_channels, out_channels))
+
+
+    def init_weights(self, init_linear='normal'):
+        _init_weights(self, init_linear)
+        
+    def forward_projection(self, x, head_num):
+        if head_num == 1:
+            x = self.projection_neck1(x)
+        elif head_num == 2:
+            x = self.projection_neck2(x)
+        if self.with_l2norm:
+            x = nn.functional.normalize(x, dim=1, p=2)
+        return x
+
+    def forward(self, x):
+        # forward computing
+        # x: list of feature maps, len(x) according to len(num_crops)
+        avg_out = []
+        for _x in x:
+            _x = _x[0]
+            if self.with_avg_pool:
+                _out = self.avgpool(_x)
+                avg_out.append(_out)
+        feat_vec = torch.cat(avg_out)  # [sum(num_crops) * N, C]
+        feat_vec = feat_vec.view(feat_vec.size(0), -1)
+        output1 = self.forward_projection(feat_vec, 1)
+        output2 = self.forward_projection(feat_vec, 2)
+        return [output1, output2]
+
+
+
+@NECKS.register_module
+class JigsawNeck(nn.Module):
+    """The non-linear neck of jigsaw without bn & normalization: fc-relu-fc.
+
+    Args:
+        in_channels (int): Number of input channels.
+        hid_channels (int): Number of hidden channels.
+        out_channels (int): Number of output channels.
+        with_avg_pool (bool): Whether to apply the global average pooling after
+            backbone. Defaults to True.
+        with_l2norm (bool): whether to normalize the output after projection.
+            Defaults to True.
+        norm_cfg (dict): Dictionary to construct and config norm layer.
+            Defaults to dict(type='SyncBN').
+        init_cfg (dict or list[dict], optional): Initialization config dict.
+    """
+
+    def __init__(self,
+                 in_channels,
+                 hid_channels,
+                 out_channels,
+                 with_avg_pool=True,
+                 jig_num=9,
+                 bs=32,
+                 ):
+        super(JigsawNeck, self).__init__()
+        self.with_avg_pool = with_avg_pool
+        self.jig_num = jig_num
+        self.bs=32
+        if with_avg_pool:
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        
+        self.projection_neck1 = nn.Sequential(
+            nn.Linear(in_channels, hid_channels),
+            nn.ReLU(inplace=True), nn.Linear(hid_channels, out_channels))
+        self.projection_neck2 = nn.Sequential(
+            nn.Linear(in_channels, hid_channels),
+            nn.ReLU(inplace=True), nn.Linear(hid_channels, out_channels),
+            nn.ReLU(inplace=True))
+        self.projection_neck3 =  nn.Linear(out_channels*9, out_channels)
+            
+
+
+    def init_weights(self, init_linear='normal'):
+        _init_weights(self, init_linear)
+        
+    def forward_projection(self, x, head_num):
+        if head_num == 1:
+            x = self.projection_neck1(x)
+        elif head_num == 2:
+            x = self.projection_neck2(x)
+            x_chunk = torch.chunk(x, chunks=self.jig_num, dim=0)
+            jigsaw_featues = torch.cat(x_chunk, dim=1)
+            # jigsaw_featues=[]
+            # for i in range(self.jig_num):
+            #     jigsaw_featues.append(x[i*self.bs:(i+1)*self.bs])
+            # jigsaw_featues = torch.cat(jigsaw_featues,1)
+            x = self.projection_neck3(jigsaw_featues)
+
+        return x
+
+    def forward(self, x):
+        # forward computing
+        # x: list of feature maps, len(x) according to len(num_crops)
+        global_f, local_f = x
+        global_f =  self.avgpool(global_f[0])
+        local_f =  self.avgpool(local_f[0])
+        # avg_out = []
+        # for _x in x:
+        #     _x = _x[0]
+        #     if self.with_avg_pool:
+        #         _out = self.avgpool(_x)
+        #         avg_out.append(_out)
+        # feat_vec = torch.cat(avg_out)  # [sum(num_crops) * N, C]
+        # feat_vec = feat_vec.view(feat_vec.size(0), -1)
+        output1 = self.forward_projection(global_f.view(global_f.size(0),-1), 1)
+        output2 = self.forward_projection(local_f.view(local_f.size(0),-1), 2)
+        return [output1, output2]
