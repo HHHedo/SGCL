@@ -55,7 +55,7 @@ Please refer to [README.md](benchmarks/detection/README.md) for transferring to 
 - If your machine has a slow data loading issue, especially for ImageNet, your are suggested to convert ImageNet to lmdb format through [folder2lmdb_imagenet.py](tools/folder2lmdb_imagenet.py) or  [folder2lmdb_coco.py](tools/folder2lmdb_coco.py), and use this [config_imagenet](configs/selfsup/densecl/densecl_imagenet_lmdb_200ep.py) or [config_coco](configs/selfsup/densecl/densecl_coco_lmdb_800ep.py) for training. 
 
 ## Acknowledgement
-We would like to thank the [OpenSelfSup](https://github.com/open-mmlab/OpenSelfSup) and [DenseCL](https://github.com/WXinlong/DenseCL) for their open-source projects, [PyContrast](https://github.com/HobbitLong/PyContrast) for its detection evaluation configs .
+We would like to thank the [OpenSelfSup](https://github.com/open-mmlab/OpenSelfSup), [LocalAgg](https://github.com/HHHedo/LocalAggregation-Pytorch) and [DenseCL](https://github.com/WXinlong/DenseCL) for their open-source projects, [PyContrast](https://github.com/HobbitLong/PyContrast) for its detection evaluation configs .
 
 ## Citations
 Please consider citing our paper in your publications if the project helps your research. BibTeX reference is TBD.
