@@ -1,76 +1,50 @@
-# Dense Contrastive Learning for Self-Supervised Visual Pre-Training
+# SGCL: Spatial Guided Contrastive Learning on Whole-slide Pathological Images
 
-This project hosts the code for implementing the DenseCL algorithm for self-supervised representation learning.
+This project hosts the code for implementing the SGCL algorithm for self-supervised representation learning on whole-slide pathological imaegs.
 
-> [**Dense Contrastive Learning for Self-Supervised Visual Pre-Training**](https://arxiv.org/abs/2011.09157),  
-> Xinlong Wang, Rufeng Zhang, Chunhua Shen, Tao Kong, Lei Li   
-> In: Proc. IEEE Conf. Computer Vision and Pattern Recognition (CVPR), 2021, **Oral**  
-> *arXiv preprint ([arXiv 2011.09157](https://arxiv.org/abs/2011.09157))*   
+SCGL is based on our preliminary work
+> [**SSLP: Spatial Guided Self-supervised Learning on Pathological Images**](https://link.springer.com/chapter/10.1007/978-3-030-87196-3_1),  
+> Jiajun Li*, Tiancheng Lin*, Yi Xu  
+> In *International Conference on Medical Image Computing
+and Computer-Assisted Intervention.* (MICCAI), 2021   
 
-![highlights2](highlights2.png)
+
 
 ## Highlights
-- **Boosting dense predictions:**  DenseCL pre-trained models largely benefit dense prediction tasks including object detection and semantic segmentation (up to +2% AP and +3% mIoU).
-- **Simple implementation:** The core part of DenseCL can be implemented in 10 lines of code, thus being easy to use and modify.
-- **Flexible usage:** DenseCL is decoupled from the data pre-processing, thus enabling fast and flexible training while being agnostic about what kind of augmentation is used and how the images are sampled.
-- **Efficient training:**  Our method introduces negligible computation overhead (only <1% slower) compared to the baseline method.
+<!-- ![prior](prior.png) -->
+- **Novel method:** SGCL is a novel self-supervised learning method for whole-slide pathological images to explore the intra-invariance, inter-invariance and inner-invariance beyond the self-invariance of instance discrimination.
+- **Exploring two intrinsic properties:** Spatial-propagated invariance and multi-object prior behind the WSIs are leveraged for designing the pretext tasks.
+- **Loss function:** A new loss function is proposed and validated via a theoretical analysis. 
+- **SOTA performance:** The proposed method achieves state-of-the-art performance on multiple pathological datasets and tasks.
 
-![highlights](highlights.png)
-
-## Updates
-   - [Simple tutorial](https://github.com/aim-uofa/AdelaiDet/blob/master/configs/DenseCL/README.md) for using DenseCL in AdelaiDet (e.g., with SOLOv2 and FCOS) is provided. (05/16/2021)
-   - Code and pre-trained models of DenseCL are released. (02/03/2021)
+![workflow](workflow.png)
 
 
 ## Installation
 Please refer to [INSTALL.md](docs/INSTALL.md) for installation and dataset preparation.
 
-## Models
-For your convenience, we provide the following pre-trained models on COCO or ImageNet.
-
-pre-train method | pre-train dataset | backbone | #epoch | training time | VOC det | VOC seg | Link
---- |:---:|:---:|:---:|:---:|:---:|:---:|:---:
-Supervised | ImageNet | ResNet-50 | - | - | 54.2 | 67.7| [download](https://cloudstor.aarnet.edu.au/plus/s/W2FST2pxKrC6HWp/download)
-MoCo-v2 | COCO | ResNet-50 | 800 | 1.0d | 54.7 | 64.5 | [download]()
-DenseCL | COCO | ResNet-50 | 800 | 1.0d | 56.7 | 67.5 | [download](https://cloudstor.aarnet.edu.au/plus/s/W5oDyYB218xz625/download)
-DenseCL | COCO | ResNet-50 | 1600 | 2.0d | 57.2 | 68.0 | [download](https://cloudstor.aarnet.edu.au/plus/s/3GapXiWuVAzdKwJ/download)
-MoCo-v2 | ImageNet | ResNet-50 | 200 | 2.3d | 57.0 | 67.5 | [download]()
-DenseCL | ImageNet | ResNet-50 | 200 | 2.3d | 58.7 | 69.4 | [download](https://cloudstor.aarnet.edu.au/plus/s/hdAg5RYm8NNM2QP/download)
-DenseCL | ImageNet | ResNet-101 | 200 | 4.3d | 61.3 | 74.1 | [download](https://cloudstor.aarnet.edu.au/plus/s/4sugyvuBOiMXXnC/download)
+## Main results
+We conduct several evalutions on [**Camelyon16**](https://camelyon16.grand-challenge.org), [**NCTCRC**](https://zenodo.org/record/1214456), [**Nucls**](https://nucls.grand-challenge.org/NuCLS), [**BCSS**](https://bcsegmentation.grand-challenge.org).
 
 **Note:** 
-- The metrics for VOC det and seg are AP (COCO-style) and mIoU. The results are averaged over 5 trials.
-- The training time is measured on 8 V100 GPUs.
+- The metrics for VOC det and seg are AP (COCO-style) and mIoU. The results are averaged over 3 trials.
+- The training time is measured on 4 3090 Ti GPUs.
 - See our paper for more results on different benchmarks.
 
-We also provide experiments of using DenseCL in AdelaiDet models, e.g., SOLOv2 and FCOS. Please refer to the [instructions](https://github.com/aim-uofa/AdelaiDet/blob/master/configs/DenseCL/README.md) for simple usage.
 
-- SOLOv2 on COCO Instance Segmentation
-
-pre-train method | pre-train dataset  |  mask AP | 
---- |:---:|:---:|
-Supervised  | ImageNet | 35.2  
-MoCo-v2  | ImageNet | 35.2
-DenseCL |  ImageNet | 35.7 (+0.5)
-
-- FCOS on COCO Object Detection
-
-pre-train method | pre-train dataset  |  box AP | 
---- |:---:|:---:|
-Supervised   | ImageNet | 39.9
-MoCo-v2  | ImageNet | 40.3
-DenseCL |  ImageNet | 40.9 (+1.0)
 
 
 ## Usage
 
 ### Training
-    ./tools/dist_train.sh configs/selfsup/densecl/densecl_coco_800ep.py 8
+    CUDA_VISIBLE_DEVICES=0,1,2,3 PORT=29504 \
+    bash tools/dist_train.sh configs/selfsup/sgcl/npidsgclmcrop.py 4 \
+    --work_dir ./work_dirs/selfsup/npidsgclmcrop
 
 ### Extracting Backbone Weights
-    WORK_DIR=work_dirs/selfsup/densecl/densecl_coco_800ep/
-    CHECKPOINT=${WORK_DIR}/epoch_800.pth
-    WEIGHT_FILE=${WORK_DIR}/extracted_densecl_coco_800ep.pth
+    WORK_DIR=work_dirs/selfsup/sgcl/npidsgclmcrop.py/
+    CHECKPOINT=${WORK_DIR}/epoch_100.pth
+    WEIGHT_FILE=${WORK_DIR}/extracted_sgcl_camelyon_100ep.pth
     
     python tools/extract_backbone_weights.py ${CHECKPOINT} ${WEIGHT_FILE}
 
@@ -79,19 +53,11 @@ Please refer to [README.md](benchmarks/detection/README.md) for transferring to 
 Please refer to the [instructions](https://github.com/aim-uofa/AdelaiDet/blob/master/configs/DenseCL/README.md) for transferring to dense prediction models in AdelaiDet, e.g., SOLOv2 and FCOS.
 
 ### Tips
-- After extracting the backbone weights, the model can be used to replace the original ImageNet pre-trained model as initialization for many dense prediction tasks. 
+- After extracting the backbone weights, the model can be used to replace the original ImageNet pre-trained model as initialization for many prediction tasks. 
 - If your machine has a slow data loading issue, especially for ImageNet, your are suggested to convert ImageNet to lmdb format through [folder2lmdb_imagenet.py](tools/folder2lmdb_imagenet.py) or  [folder2lmdb_coco.py](tools/folder2lmdb_coco.py), and use this [config_imagenet](configs/selfsup/densecl/densecl_imagenet_lmdb_200ep.py) or [config_coco](configs/selfsup/densecl/densecl_coco_lmdb_800ep.py) for training. 
 
 ## Acknowledgement
-We would like to thank the [OpenSelfSup](https://github.com/open-mmlab/OpenSelfSup) for its open-source project and [PyContrast](https://github.com/HobbitLong/PyContrast) for its detection evaluation configs.
+We would like to thank the [OpenSelfSup](https://github.com/open-mmlab/OpenSelfSup) and [DenseCL](https://github.com/WXinlong/DenseCL) for their open-source projects, [PyContrast](https://github.com/HobbitLong/PyContrast) for its detection evaluation configs .
 
 ## Citations
-Please consider citing our paper in your publications if the project helps your research. BibTeX reference is as follow.
-```
-@inproceedings{wang2020DenseCL,
-  title={Dense Contrastive Learning for Self-Supervised Visual Pre-Training},
-  author={Wang, Xinlong and Zhang, Rufeng and Shen, Chunhua and Kong, Tao and Li, Lei},
-  booktitle =  {Proc. IEEE Conf. Computer Vision and Pattern Recognition (CVPR)},
-  year={2021}
-}
-```
+Please consider citing our paper in your publications if the project helps your research. BibTeX reference is TBD.
