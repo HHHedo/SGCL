@@ -50,8 +50,6 @@ We conduct several evalutions on [**Camelyon16**](https://camelyon16.grand-chall
 
 ### Transferring to Object Detection and Segmentation
 Please refer to [README.md](benchmarks/detection/README.md) for transferring to object detection and semantic segmentation.
-Please refer to the [instructions](https://github.com/aim-uofa/AdelaiDet/blob/master/configs/DenseCL/README.md) for transferring to dense prediction models in AdelaiDet, e.g., SOLOv2 and FCOS.
-
 ### Tips
 - After extracting the backbone weights, the model can be used to replace the original ImageNet pre-trained model as initialization for many prediction tasks. 
 - If your machine has a slow data loading issue, especially for ImageNet, your are suggested to convert ImageNet to lmdb format through [folder2lmdb_imagenet.py](tools/folder2lmdb_imagenet.py) or  [folder2lmdb_coco.py](tools/folder2lmdb_coco.py), and use this [config_imagenet](configs/selfsup/densecl/densecl_imagenet_lmdb_200ep.py) or [config_coco](configs/selfsup/densecl/densecl_coco_lmdb_800ep.py) for training. 
