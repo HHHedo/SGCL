@@ -59,6 +59,7 @@ We would like to thank the [OpenSelfSup](https://github.com/open-mmlab/OpenSelfS
 
 ## Citations
 Please consider citing our paper in your publications if the project helps your research. 
+```
 @article{lin2023sgcl,
   title={SGCL: Spatial guided contrastive learning on whole-slide pathological images},
   author={Lin, Tiancheng and Yu, Zhimiao and Xu, Zengchao and Hu, Hongyu and Xu, Yi and Chen, Chang-Wen},
