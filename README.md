@@ -58,4 +58,12 @@ Please refer to [README.md](benchmarks/detection/README.md) for transferring to 
 We would like to thank the [OpenSelfSup](https://github.com/open-mmlab/OpenSelfSup), [LocalAgg](https://github.com/HHHedo/LocalAggregation-Pytorch) and [DenseCL](https://github.com/WXinlong/DenseCL) for their open-source projects, [PyContrast](https://github.com/HobbitLong/PyContrast) for its detection evaluation configs .
 
 ## Citations
-Please consider citing our paper in your publications if the project helps your research. BibTeX reference is TBD.
+Please consider citing our paper in your publications if the project helps your research. 
+@article{lin2023sgcl,
+  title={SGCL: Spatial guided contrastive learning on whole-slide pathological images},
+  author={Lin, Tiancheng and Yu, Zhimiao and Xu, Zengchao and Hu, Hongyu and Xu, Yi and Chen, Chang-Wen},
+  journal={Medical Image Analysis},
+  pages={102845},
+  year={2023},
+  publisher={Elsevier}
+}
